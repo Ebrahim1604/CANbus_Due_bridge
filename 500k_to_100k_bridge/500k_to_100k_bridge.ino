@@ -1,12 +1,14 @@
 // CAN Layer functions
-// -----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 #include "DueCANLayer.h"
 extern byte canInit(byte cPort, long lBaudRate, int nTxMailboxes);
-extern byte canTx(byte cPort, long lMsgID, bool bExtendedFormat, byte* cData, byte cDataLen);
-extern byte canRx(byte cPort, long* lMsgID, bool* bExtendedFormat, byte* cData, byte* cDataLen);
+extern byte canTx(byte cPort, long lMsgID, bool bExtendedFormat, byte* cData, 
+                  byte cDataLen);
+extern byte canRx(byte cPort, long* lMsgID, bool* bExtendedFormat, byte* cData, 
+                  byte* cDataLen);
 
 // Timer functions
-// -----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 #include "TimerControl.h"
 extern void TimerInit(void);
 extern void TimerControl(void);
@@ -14,34 +16,13 @@ extern void TimerStart(struct Timer* pTimer, int nCount);
 extern void TimerReset(struct Timer* pTimer);
 extern struct Timer pTimer[];
 
-// CAN Bus Data Mapping
-// -----------------------------------------------------------------------------------------------
-struct Mapping
-{
-  byte cReceivingPort;             // 0/1
-  long lReceivingMsgID;
-  long lTransmittedMsgID;
-};
-
-struct Mapping CAN_DataMapping[] = {
-  // cReceivingPort, lReceivingMsgID, lTransmittedMsgID
-     0,              0x180,           0x280,
-     0,              0x300,           0x200,
-     0,              0x200,           0x201,
-     1,              0x280,           0x180,
-     1,              0x200,           0x300,
-     1,              0x201,           0x200,
-     255,            0x000,           0x000   // End of Table
-};
-
-int nMappingEntries = 0;   // Will be determined in setup()
-
 // Internal functions
-// -----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 void LEDControl(void);
+void ErrorControl(bool bError);
 
 // Module variables
-// -----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 int TimerActivity_CAN0 = 0;
 int TimerActivity_CAN1 = 0;
 
@@ -52,44 +33,49 @@ int nTxMailboxes = 3; // Equal portion between transmission and reception
 
 void setup()
 {
+  // Declarations
+  bool bError = false;
+
   // Set the serial interface baud rate
   Serial.begin(115200);
 
   // Initialzie the timer control; also resets all timers
   TimerInit();
 
-  // Determine simulation entries
-  nMappingEntries = 0;
-  while(1)
-  {
-    if(CAN_DataMapping[nMappingEntries].cReceivingPort == 0 
-    || CAN_DataMapping[nMappingEntries].cReceivingPort == 1)
-      nMappingEntries++;
-    else
-      break;
-  }
-
   // Initialize the outputs for the LEDs
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
-  
+
   // Initialize both CAN controllers
-  if(canInit(0, CAN_BPS_250K, nTxMailboxes) == CAN_OK)
-    Serial.print("CAN0: Initialized Successfully.\n\r");
+  if(canInit(0, CAN_BPS_500K, nTxMailboxes) == CAN_OK) //Idrive NBT EVO to CAN0 at 500kbps
+  {
+    Serial.print("NBT EVO Idrive initialized at 500kbps on CAN0 port.\n\r");
+  }
   else
-    Serial.print("CAN0: Initialization Failed.\n\r");
+  {
+    Serial.print("NBT EVO Idrive Initialization Failed at 500kpbs on CAN0 port.\n\r");
+    bError = true;
+  }// end else
   
-  if(canInit(1, CAN_BPS_500K, nTxMailboxes) == CAN_OK)
-    Serial.print("CAN1: Initialized Successfully.\n\r");
+  if(canInit(1, CAN_BPS_100K, nTxMailboxes) == CAN_OK)// Audi X7 E71 to CAN1 at 100kbps
+  {
+    Serial.print("Audi X6 E71 initialized at 100kbps on CAN0 port.\n\r");
+  }
   else
-    Serial.print("CAN1: Initialization Failed.\n\r");
+  {
+    Serial.print("Audi X6 E71 Initialization Failed at 500kpbs on CAN0 port.\n\r");
+    bError = true;
+  }// end else
+
+  // Do not continue, in case there was an error
+  ErrorControl(bError);
   
 }// end setup
 
 void loop()
 {
   // Declarations
-  byte cPort, cTxPort;
+  bool bError = false;
   long lMsgID;
   bool bExtendedFormat;
   byte cData[8];
@@ -98,39 +84,66 @@ void loop()
   // Start timer for LED indicators
   TimerStart(&pTimerLEDs, TIMER_RATE_LED_BLINK);
 
-  while(1)  // Endless loop
-  {
-    // Control LED status according to CAN traffic
-    LEDControl();
+  // Control LED status according to CAN traffic
+  LEDControl();
 
-    // Check for received CAN messages
-    for(cPort = 0; cPort <= 1; cPort++)
+  // Check for received CAN messages on port 0 for NBT EVO
+  if(canRx(0, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
     {
-      if(canRx(cPort, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
+      // Repeat data frame to X6 E71 at port 1
+      if(canTx(1, lMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
       {
-        // Scan through the mapping list
-        for(int nIndex = 0; nIndex < nMappingEntries; nIndex++)
-        {
-          if(cPort == CAN_DataMapping[nIndex].cReceivingPort
-          && lMsgID == CAN_DataMapping[nIndex].lReceivingMsgID)
-          {
-            cTxPort = 0;
-            if(cPort == 0) cTxPort = 1;
-              
-            if(canTx(cTxPort, CAN_DataMapping[nIndex].lTransmittedMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
-              Serial.println("Transmision Error.");
-            
-          }// end if
-          
-        }// end for
-  
-      }// end if
+          bError = true;
+      }
+    }
+  // Check for received CAN messages on port 1
+  if(canRx(1, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
+  {
+      Serial.print("Response from X6 E71: Rx - MsgID:");
+      Serial.print(lMsgID, HEX);
+      Serial.print(" Ext:");
+      Serial.print(bExtendedFormat);
+      Serial.print(" Len:");
+      Serial.print(cDataLen);
+      Serial.print(" Data:");
 
-    }// end for
-    
-  }// end while
+      for(byte cIndex = 0; cIndex < cDataLen; cIndex++)
+      {
+        Serial.print(cData[cIndex], HEX);
+        Serial.print(" ");
+      }// end for
+
+      Serial.print("\n\r");
+      /*
+      // Repeat data frame to port 0
+      if(canTx(0, lMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
+      {
+          bError = true;
+      }
+      */
+  }
+  // Do not continue, in case there was an error
+  ErrorControl(bError);
 
 }// end loop
+
+// ------------------------------------------------------------------------
+// Error Control
+// ------------------------------------------------------------------------
+void ErrorControl(bool bError)
+{
+    // Check for error
+    if(bError == true)
+    {
+        // Output the error message
+        Serial.println("Error Condition, program stopped");
+
+        // Remain in endless loop
+        while(1);
+
+    }// end if
+
+}// end ErrorControl
 
 // ------------------------------------------------------------------------
 // LED Data Traffic
