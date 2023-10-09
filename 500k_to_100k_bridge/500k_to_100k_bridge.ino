@@ -53,17 +53,17 @@ void setup()
   }
   else
   {
-    Serial.print("NBT EVO Idrive Initialization Failed at 500kpbs on CAN0 port.\n\r");
+    Serial.print("Failed to Initialize NBT EVO Idrive at 500kpbs on CAN0 port.\n\r");
     bError = true;
   }// end else
   
-  if(canInit(1, CAN_BPS_100K, nTxMailboxes) == CAN_OK)// Audi X7 E71 to CAN1 at 100kbps
+  if(canInit(1, CAN_BPS_100K, nTxMailboxes) == CAN_OK)// BMW X7 E71 to CAN1 at 100kbps
   {
-    Serial.print("Audi X6 E71 initialized at 100kbps on CAN0 port.\n\r");
+    Serial.print("BMW X6 E71 initialized at 100kbps on CAN1 port.\n\r");
   }
   else
   {
-    Serial.print("Audi X6 E71 Initialization Failed at 500kpbs on CAN0 port.\n\r");
+    Serial.print("BMW X6 E71 Initialization Failed at 100kpbs on CAN1 port.\n\r");
     bError = true;
   }// end else
 
@@ -86,19 +86,23 @@ void loop()
 
   // Control LED status according to CAN traffic
   LEDControl();
-
-  // Check for received CAN messages on port 0 for NBT EVO
-  if(canRx(0, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
+  
+  delay(50);
+  // Check for received CAN messages on port 1 from BMW x6
+  if(canRx(1, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
     {
-      // Repeat data frame to X6 E71 at port 1
-      if(canTx(1, lMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
+      // Repeat data frame to NBT EVO at port 0
+      if(canTx(0, lMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
       {
           bError = true;
       }
     }
-  // Check for received CAN messages on port 1
-  if(canRx(1, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
+
+    delay(50);
+  // Check for received CAN messages on port 0 from NBT EVO
+  if(canRx(0, &lMsgID, &bExtendedFormat, &cData[0], &cDataLen) == CAN_OK)
   {
+    /*
       Serial.print("Response from X6 E71: Rx - MsgID:");
       Serial.print(lMsgID, HEX);
       Serial.print(" Ext:");
@@ -114,13 +118,13 @@ void loop()
       }// end for
 
       Serial.print("\n\r");
-      /*
-      // Repeat data frame to port 0
-      if(canTx(0, lMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
+      */
+
+      // Repeat data frame to BMW x6 e71
+      if(canTx(1, lMsgID, bExtendedFormat, &cData[0], cDataLen) == CAN_ERROR)
       {
           bError = true;
       }
-      */
   }
   // Do not continue, in case there was an error
   ErrorControl(bError);
